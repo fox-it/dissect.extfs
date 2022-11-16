@@ -113,7 +113,6 @@ class ExtFS:
 
         path = path.replace("\\", "/")
         node = node if node else self.root
-
         parts = path.split("/")
         for part_num, part in enumerate(parts):
             if not part:
@@ -229,8 +228,6 @@ class INode:
             link = self.link
             if link.startswith("/"):
                 relnode = None
-            elif link.startswith("./") or link.startswith("../"):
-                relnode = self
             else:
                 relnode = self.parent
             self._link_inode = self.extfs.get(self.link, relnode)

@@ -1,4 +1,5 @@
 import datetime
+import pytest
 import stat
 
 from dissect.extfs import extfs
@@ -45,3 +46,25 @@ def test_xattr(ext4_simple):
     assert xattrs[0].value == b"unconfined_u:object_r:unlabeled_t:s0\x00"
     assert xattrs[1].name == "security.capability"
     assert xattrs[1].value == b"\x01\x00\x00\x02\x00\x04@\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
+
+@pytest.mark.parametrize(
+    "image_file",
+    [
+        ("tests/data/ext4_symlink_test1.bin"),
+        ("tests/data/ext4_symlink_test2.bin"),
+        ("tests/data/ext4_symlink_test3.bin"),
+    ],
+)
+def test_symlinks(image_file):
+
+    path = "/path/to/dir/with/file.ext"
+    expect = b"resolved!\n"
+
+    def resolve(node):
+        while node.filetype == stat.S_IFLNK:
+            node = node.link_inode
+        return node
+
+    with open(image_file, "rb") as disk:
+        assert resolve(extfs.ExtFS(disk).get(path)).open().read() == expect
