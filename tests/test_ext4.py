@@ -1,6 +1,8 @@
 import datetime
-import pytest
+import gzip
 import stat
+
+import pytest
 
 from dissect.extfs import extfs
 
@@ -51,9 +53,9 @@ def test_xattr(ext4_simple):
 @pytest.mark.parametrize(
     "image_file",
     [
-        ("tests/data/ext4_symlink_test1.bin"),
-        ("tests/data/ext4_symlink_test2.bin"),
-        ("tests/data/ext4_symlink_test3.bin"),
+        ("tests/data/ext4_symlink_test1.bin.gz"),
+        ("tests/data/ext4_symlink_test2.bin.gz"),
+        ("tests/data/ext4_symlink_test3.bin.gz"),
     ],
 )
 def test_symlinks(image_file):
@@ -66,5 +68,5 @@ def test_symlinks(image_file):
             node = node.link_inode
         return node
 
-    with open(image_file, "rb") as disk:
+    with gzip.open(image_file, "rb") as disk:
         assert resolve(extfs.ExtFS(disk).get(path)).open().read() == expect
