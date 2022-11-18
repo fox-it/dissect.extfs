@@ -218,7 +218,7 @@ class INode:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
         if not self._link:
-            self._link = self.open().read(self.size).decode()
+            self._link = self.open().read().decode()
         return self._link
 
     @property
@@ -427,7 +427,10 @@ class INode:
 
     def open(self):
         if self.inode.i_flags & c_ext.EXT4_INLINE_DATA_FL or self.filetype == stat.S_IFLNK and self.size < 60:
-            return io.BytesIO(memoryview(self.inode.i_block)[: self.size])
+            buf = io.BytesIO(memoryview(self.inode.i_block)[: self.size])
+            # Need to add a size attribute to maintain compatibility with dissect streams
+            buf.size = self.size
+            return buf
         return RunlistStream(self.extfs.fh, self.dataruns(), self.size, self.extfs.block_size)
 
     def __repr__(self):
