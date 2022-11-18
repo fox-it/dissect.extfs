@@ -86,7 +86,7 @@ class ExtFS:
         self.groups_count = ((self.last_block - sb.s_first_data_block) // sb.s_blocks_per_group) + 1
 
         self.uuid = UUID(bytes=sb.s_uuid)
-        self.last_mount = sb.s_last_mounted.split(b"\x00")[0].decode()
+        self.last_mount = sb.s_last_mounted.split(b"\x00")[0].decode(errors="surrogateescape")
 
         self.root = self.get_inode(c_ext.EXT2_ROOT_INO, "/")
 
@@ -218,7 +218,7 @@ class INode:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
         if not self._link:
-            self._link = self.open().read().decode()
+            self._link = self.open().read().decode(errors="surrogateescape")
         return self._link
 
     @property
@@ -444,7 +444,7 @@ class XAttr:
         self.entry = entry
 
         self.prefix = XATTR_PREFIX_MAP.get(entry.e_name_index, "unknown_prefix")
-        self._name = XATTR_NAME_MAP.get(entry.e_name_index, entry.e_name.decode())
+        self._name = XATTR_NAME_MAP.get(entry.e_name_index, entry.e_name.decode(errors="surrogateescape"))
         self.name = self.prefix + self._name
         self.value = value
 
