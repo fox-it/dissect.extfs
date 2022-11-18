@@ -332,7 +332,7 @@ class INode:
                 # Sanity check if the direntry is valid
                 if direntry.inode < self.extfs.sb.s_inodes_count and direntry.inode > 1:
                     fname = buf.read(direntry.name_len)
-                    fname = fname.decode("utf-8", "surrogateescape")
+                    fname = fname.decode(errors="surrogateescape")
                     ftype = direntry.file_type if self.extfs._dirtype == c_ext.ext2_dir_entry_2 else None
 
                     if ftype:
