@@ -86,7 +86,7 @@ class ExtFS:
         self.groups_count = ((self.last_block - sb.s_first_data_block) // sb.s_blocks_per_group) + 1
 
         self.uuid = UUID(bytes=sb.s_uuid)
-        self.last_mount = sb.s_last_mounted.split(b"\x00")[0].decode()
+        self.last_mount = sb.s_last_mounted.split(b"\x00")[0].decode(errors="surrogateescape")
 
         self.root = self.get_inode(c_ext.EXT2_ROOT_INO, "/")
 
@@ -113,7 +113,6 @@ class ExtFS:
 
         path = path.replace("\\", "/")
         node = node if node else self.root
-
         parts = path.split("/")
         for part_num, part in enumerate(parts):
             if not part:
@@ -219,7 +218,7 @@ class INode:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
         if not self._link:
-            self._link = self.open().read(self.size).decode()
+            self._link = self.open().read().decode(errors="surrogateescape")
         return self._link
 
     @property
@@ -229,8 +228,6 @@ class INode:
             link = self.link
             if link.startswith("/"):
                 relnode = None
-            elif link.startswith("./") or link.startswith("../"):
-                relnode = self
             else:
                 relnode = self.parent
             self._link_inode = self.extfs.get(self.link, relnode)
@@ -335,7 +332,7 @@ class INode:
                 # Sanity check if the direntry is valid
                 if direntry.inode < self.extfs.sb.s_inodes_count and direntry.inode > 1:
                     fname = buf.read(direntry.name_len)
-                    fname = fname.decode("utf-8", "surrogateescape")
+                    fname = fname.decode(errors="surrogateescape")
                     ftype = direntry.file_type if self.extfs._dirtype == c_ext.ext2_dir_entry_2 else None
 
                     if ftype:
@@ -430,7 +427,10 @@ class INode:
 
     def open(self):
         if self.inode.i_flags & c_ext.EXT4_INLINE_DATA_FL or self.filetype == stat.S_IFLNK and self.size < 60:
-            return io.BytesIO(memoryview(self.inode.i_block)[: self.size])
+            buf = io.BytesIO(memoryview(self.inode.i_block)[: self.size])
+            # Need to add a size attribute to maintain compatibility with dissect streams
+            buf.size = self.size
+            return buf
         return RunlistStream(self.extfs.fh, self.dataruns(), self.size, self.extfs.block_size)
 
     def __repr__(self):
@@ -444,7 +444,7 @@ class XAttr:
         self.entry = entry
 
         self.prefix = XATTR_PREFIX_MAP.get(entry.e_name_index, "unknown_prefix")
-        self._name = XATTR_NAME_MAP.get(entry.e_name_index, entry.e_name.decode())
+        self._name = XATTR_NAME_MAP.get(entry.e_name_index, entry.e_name.decode(errors="surrogateescape"))
         self.name = self.prefix + self._name
         self.value = value
 
