@@ -9,13 +9,13 @@ from dissect.util import ts
 from dissect.util.stream import RangeStream, RunlistStream
 
 from dissect.extfs.c_ext import (
-    c_ext,
     EXT2,
     EXT3,
     EXT4,
     FILETYPES,
     XATTR_NAME_MAP,
     XATTR_PREFIX_MAP,
+    c_ext,
 )
 from dissect.extfs.exceptions import (
     Error,
@@ -24,7 +24,6 @@ from dissect.extfs.exceptions import (
     NotASymlinkError,
 )
 from dissect.extfs.journal import JDB2
-
 
 log = logging.getLogger(__name__)
 log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
