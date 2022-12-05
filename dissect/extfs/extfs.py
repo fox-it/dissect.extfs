@@ -9,13 +9,13 @@ from dissect.util import ts
 from dissect.util.stream import RangeStream, RunlistStream
 
 from dissect.extfs.c_ext import (
-    c_ext,
     EXT2,
     EXT3,
     EXT4,
     FILETYPES,
     XATTR_NAME_MAP,
     XATTR_PREFIX_MAP,
+    c_ext,
 )
 from dissect.extfs.exceptions import (
     Error,
@@ -24,7 +24,6 @@ from dissect.extfs.exceptions import (
     NotASymlinkError,
 )
 from dissect.extfs.journal import JDB2
-
 
 log = logging.getLogger(__name__)
 log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
@@ -121,11 +120,12 @@ class ExtFS:
             while node.filetype == stat.S_IFLNK and part_num < len(parts):
                 node = node.link_inode
 
-            dirlist = node.listdir()
-            if part not in dirlist:
+            for entry in node.iterdir():
+                if entry.filename == part:
+                    node = entry
+                    break
+            else:
                 raise FileNotFoundError(f"File not found: {path}")
-
-            node = dirlist[part]
 
         return node
 
@@ -317,38 +317,38 @@ class INode:
         return _parse_ns_ts(time, time_extra)
 
     def listdir(self):
-        if self.filetype != stat.S_IFDIR:
-            raise NotADirectoryError(f"{self!r} is not a directory")
-
         if not self._dirlist:
-            dirs = {}
-
-            buf = io.BytesIO(self.open().read())
-            size_count = 0
-
-            while size_count < self.size - 12:
-                direntry = self.extfs._dirtype(buf)
-
-                # Sanity check if the direntry is valid
-                if direntry.inode < self.extfs.sb.s_inodes_count and direntry.inode > 1:
-                    fname = buf.read(direntry.name_len)
-                    fname = fname.decode(errors="surrogateescape")
-                    ftype = direntry.file_type if self.extfs._dirtype == c_ext.ext2_dir_entry_2 else None
-
-                    if ftype:
-                        ftype = FILETYPES[ftype]
-
-                    inode = self.extfs.get_inode(direntry.inode, fname, ftype, parent=self, lazy=True)
-                    dirs[fname] = inode
-
-                size_count += direntry.rec_len
-                buf.seek(size_count)
-
-            self._dirlist = dirs
-
+            self._dirlist = {node.filename: node for node in self.iterdir()}
         return self._dirlist
 
     dirlist = listdir
+
+    def iterdir(self):
+        if self.filetype != stat.S_IFDIR:
+            raise NotADirectoryError(f"{self!r} is not a directory")
+
+        buf = self.open()
+        offset = 0
+
+        while offset < self.size - 12:
+            direntry = self.extfs._dirtype(buf)
+
+            if direntry.rec_len == 0:
+                log.critical("Zero-length directory entry in %s (offset 0x%x)", self, offset)
+                return
+
+            # Sanity check if the direntry is valid
+            if 0 < direntry.inode < self.extfs.sb.s_inodes_count:
+                fname = buf.read(direntry.name_len).decode(errors="surrogateescape")
+                ftype = direntry.file_type if self.extfs._dirtype == c_ext.ext2_dir_entry_2 else None
+
+                if ftype:
+                    ftype = FILETYPES[ftype]
+
+                yield self.extfs.get_inode(direntry.inode, fname, ftype, parent=self, lazy=True)
+
+            offset += direntry.rec_len
+            buf.seek(offset)
 
     def dataruns(self):
         if not self._runlist:

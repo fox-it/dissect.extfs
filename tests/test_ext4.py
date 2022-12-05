@@ -1,10 +1,12 @@
 import datetime
 import gzip
 import stat
+from io import BytesIO
+from unittest.mock import call, patch
 
 import pytest
 
-from dissect.extfs import extfs
+from dissect.extfs import INode, c_ext, extfs
 
 
 def test_ext4(ext4_simple):
@@ -70,3 +72,16 @@ def test_symlinks(image_file):
 
     with gzip.open(image_file, "rb") as disk:
         assert resolve(extfs.ExtFS(disk).get(path)).open().read() == expect
+
+
+@patch("dissect.extfs.extfs.INode.open", return_value=BytesIO(b"\x00" * 16))
+@patch("dissect.extfs.extfs.log", create=True, return_value=None)
+@patch("dissect.extfs.extfs.ExtFS")
+def test_infinite_loop_protection(ExtFS, log, *args):
+    ExtFS.sb.s_inodes_count = 69
+    ExtFS._dirtype = c_ext.c_ext.ext2_dir_entry_2
+    inode = INode(ExtFS, 1, filetype=stat.S_IFDIR)
+    inode._size = 16
+    for _ in inode.iterdir():
+        pass
+    assert call.critical("Zero-length directory entry in %s (offset 0x%x)", inode, 0) in log.mock_calls
