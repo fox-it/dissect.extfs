@@ -61,7 +61,6 @@ def test_xattr(ext4_simple):
     ],
 )
 def test_symlinks(image_file):
-
     path = "/path/to/dir/with/file.ext"
     expect = b"resolved!\n"
 
