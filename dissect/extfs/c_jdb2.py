@@ -1,6 +1,5 @@
 from dissect import cstruct
 
-
 jdb2_def = """
 #define JBD2_MAGIC_NUMBER                   0xC03B3998
 
