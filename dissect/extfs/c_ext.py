@@ -2,7 +2,6 @@ import stat
 
 from dissect import cstruct
 
-
 ext_def = """
 #define EXT2_SBOFF              1024        // offset to superblock
 #define EXT2_FS_MAGIC           0xef53
