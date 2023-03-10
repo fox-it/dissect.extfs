@@ -110,7 +110,6 @@ class ExtFS:
         if isinstance(path, int):
             return self.get_inode(path)
 
-        path = path.replace("\\", "/")
         node = node if node else self.root
         parts = path.split("/")
         for part_num, part in enumerate(parts):
