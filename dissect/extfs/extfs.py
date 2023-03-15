@@ -389,9 +389,9 @@ class INode:
                 num_blocks -= num_direct_blocks
 
                 if num_blocks > 0:
-                    for level in range(1, c_ext.EXT2_NIND_BLOCKS):
-                        indirect_offset = i_blocks[num_direct_blocks + level - 1]
-                        parsed_blocks = _parse_indirect(self, indirect_offset, num_blocks, level)
+                    for level in range(c_ext.EXT2_NIND_BLOCKS):
+                        indirect_offset = i_blocks[num_direct_blocks + level]
+                        parsed_blocks = _parse_indirect(self, indirect_offset, num_blocks, level + 1)
                         num_blocks -= len(parsed_blocks)
                         blocks.extend(parsed_blocks)
 
