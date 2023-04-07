@@ -8,27 +8,28 @@ from unittest.mock import call, patch
 
 import pytest
 
-from dissect.extfs import INode, c_ext, extfs
+from dissect.extfs.c_ext import c_ext
+from dissect.extfs.extfs import EXT4, ExtFS, INode
 
 
-def test_ext4(ext4_simple: BinaryIO):
-    e = extfs.ExtFS(ext4_simple)
+def test_ext4(ext4_bin: BinaryIO):
+    extfs = ExtFS(ext4_bin)
 
-    assert e.type == extfs.EXT4
-    assert e.block_count == 2048
-    assert e.groups_count == 1
-    assert e.groups_offset == 2048
-    assert e._group_desc_size == 64
-    assert str(e.uuid) == "ab98e08e-e2da-4bc9-bfc6-1ac5eafb1001"
-    assert e.last_mount == "/tmp/mnt"
+    assert extfs.type == EXT4
+    assert extfs.block_count == 2048
+    assert extfs.groups_count == 1
+    assert extfs.groups_offset == 2048
+    assert extfs._group_desc_size == 64
+    assert str(extfs.uuid) == "ab98e08e-e2da-4bc9-bfc6-1ac5eafb1001"
+    assert extfs.last_mount == "/tmp/mnt"
 
-    root = e.root
+    root = extfs.root
     assert root.size == 1024
     assert root.filetype == stat.S_IFDIR
     assert root.filename == "/"
     assert sorted(root.dirlist().keys()) == [".", "..", "lost+found", "test_file", "xattr_cap"]
 
-    inode = e.get("test_file")
+    inode = extfs.get("test_file")
     assert inode.size == 26
     assert inode.filetype == stat.S_IFREG
     assert inode.filename == "test_file"
@@ -37,12 +38,12 @@ def test_ext4(ext4_simple: BinaryIO):
     assert inode.atime == datetime.datetime(2018, 5, 29, 8, 57, 58, tzinfo=datetime.timezone.utc)
     assert inode.atime_ns == 1527584278000000000
 
-    assert e.journal
-    assert len(list(e.journal.commits())) == 2
+    assert extfs.journal
+    assert len(list(extfs.journal.commits())) == 2
 
 
-def test_xattr(ext4_simple: BinaryIO):
-    e = extfs.ExtFS(ext4_simple)
+def test_xattr(ext4_bin: BinaryIO):
+    e = ExtFS(ext4_bin)
 
     inode = e.get("xattr_cap")
 
@@ -52,6 +53,26 @@ def test_xattr(ext4_simple: BinaryIO):
     assert xattrs[0].value == b"unconfined_u:object_r:unlabeled_t:s0\x00"
     assert xattrs[1].name == "security.capability"
     assert xattrs[1].value == b"\x01\x00\x00\x02\x00\x04@\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
+
+def test_sparse(ext4_sparse_bin: BinaryIO):
+    extfs = ExtFS(ext4_sparse_bin)
+
+    sparse_start = extfs.get("sparse_start")
+    assert sparse_start.size == 0x3C000
+    assert sparse_start.dataruns() == [(None, 160), (1833, 80)]
+
+    sparse_hole = extfs.get("sparse_hole")
+    assert sparse_hole.size == 0x3C000
+    assert sparse_hole.dataruns() == [(1537, 80), (None, 80), (1697, 80)]
+
+    sparse_end = extfs.get("sparse_end")
+    assert sparse_end.size == 0x28000
+    assert sparse_end.dataruns() == [(1793, 40), (None, 120)]
+
+    sparse_all = extfs.get("sparse_all")
+    assert sparse_all.size == 0x500000
+    assert sparse_all.dataruns() == [(None, 5120)]
 
 
 @pytest.mark.parametrize(
@@ -72,15 +93,15 @@ def test_symlinks(image_file: str):
         return node
 
     with gzip.open(image_file, "rb") as disk:
-        assert resolve(extfs.ExtFS(disk).get(path)).open().read() == expect
+        assert resolve(ExtFS(disk).get(path)).open().read() == expect
 
 
 @patch("dissect.extfs.extfs.INode.open", return_value=BytesIO(b"\x00" * 16))
 @patch("dissect.extfs.extfs.log", create=True, return_value=None)
 @patch("dissect.extfs.extfs.ExtFS")
-def test_infinite_loop_protection(ExtFS: extfs.ExtFS, log: Logger, *args):
+def test_infinite_loop_protection(ExtFS: ExtFS, log: Logger, *args):
     ExtFS.sb.s_inodes_count = 69
-    ExtFS._dirtype = c_ext.c_ext.ext2_dir_entry_2
+    ExtFS._dirtype = c_ext.ext2_dir_entry_2
     inode = INode(ExtFS, 1, filetype=stat.S_IFDIR)
     inode._size = 16
     for _ in inode.iterdir():

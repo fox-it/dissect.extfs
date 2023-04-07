@@ -372,33 +372,33 @@ class INode:
 
     def dataruns(self) -> list[tuple[Optional[int], int]]:
         if not self._runlist:
+            expected_runs = (self.size + self.extfs.block_size - 1) // self.extfs.block_size
+
             if self.inode.i_flags & c_ext.EXT4_EXTENTS_FL:
                 buf = io.BytesIO(self.inode.i_block)
 
                 runs = []
                 run_offset = 0
-                extents = list(_parse_extents(self, buf))
 
-                if not extents:
-                    # Completely sparse run
-                    runs = [(None, (self.size + self.extfs.block_size - 1) // self.extfs.block_size)]
-                else:
-                    for extent in extents:
-                        # Account for uninitialized extents
-                        if extent.ee_len > 0x8000:
-                            uninitialized_gap = extent.ee_len - 0x8000
-                            runs.append((None, uninitialized_gap))
-                            run_offset += uninitialized_gap
-                            continue
+                for extent in _parse_extents(self, buf):
+                    # Account for uninitialized extents
+                    if extent.ee_len > 0x8000:
+                        uninitialized_gap = extent.ee_len - 0x8000
+                        runs.append((None, uninitialized_gap))
+                        run_offset += uninitialized_gap
+                        continue
 
-                        # Account for sparse gaps
-                        if extent.ee_block != run_offset:
-                            sparse_gap = extent.ee_block - run_offset
-                            runs.append((None, sparse_gap))
-                            run_offset += sparse_gap
+                    # Account for sparse gaps
+                    if extent.ee_block != run_offset:
+                        sparse_gap = extent.ee_block - run_offset
+                        runs.append((None, sparse_gap))
+                        run_offset += sparse_gap
 
-                        runs.append(((extent.ee_start_hi << 32) | extent.ee_start_lo, extent.ee_len))
-                        run_offset += extent.ee_len
+                    runs.append(((extent.ee_start_hi << 32) | extent.ee_start_lo, extent.ee_len))
+                    run_offset += extent.ee_len
+
+                if run_offset < expected_runs:
+                    runs.append((None, expected_runs - run_offset))
 
                 self._runlist = runs
             else:
@@ -438,8 +438,8 @@ class INode:
                                 runs.append((run_offset, run_size))
                             run_offset = block
                             run_size = 1
-                    else:
-                        runs.append((run_offset, run_size))
+
+                    runs.append((run_offset, run_size))
 
                 self._runlist = runs
 
