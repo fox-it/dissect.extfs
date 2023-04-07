@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import io
 import logging
 import os
 import stat
+from datetime import datetime
 from functools import lru_cache
+from typing import BinaryIO, Iterator, Optional, Union
 from uuid import UUID
 
+from dissect.cstruct import Instance
 from dissect.util import ts
 from dissect.util.stream import RangeStream, RunlistStream
 
@@ -30,7 +35,7 @@ log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
 
 
 class ExtFS:
-    def __init__(self, fh):
+    def __init__(self, fh: BinaryIO):
         self.fh = fh
         # self._path_cache = {}
         self._journal = None
@@ -89,8 +94,11 @@ class ExtFS:
 
         self.root = self.get_inode(c_ext.EXT2_ROOT_INO, "/")
 
+        self.get_inode = lru_cache(1024)(self.get_inode)
+        self._read_group_desc = lru_cache(356)(self._read_group_desc)
+
     @property
-    def journal(self):
+    def journal(self) -> JDB2:
         if not self._journal:
             if not self.sb.s_feature_compat & c_ext.EXT3_FEATURE_COMPAT_HAS_JOURNAL:
                 raise Error("Journal not supported")
@@ -106,7 +114,7 @@ class ExtFS:
 
         return self._journal
 
-    def get(self, path, node=None):
+    def get(self, path: Union[str, int], node: Optional[INode] = None) -> INode:
         if isinstance(path, int):
             return self.get_inode(path)
 
@@ -128,8 +136,14 @@ class ExtFS:
 
         return node
 
-    @lru_cache(1024)
-    def get_inode(self, inum, filename=None, filetype=None, parent=None, lazy=False):
+    def get_inode(
+        self,
+        inum: int,
+        filename: Optional[str] = None,
+        filetype: Optional[int] = None,
+        parent: Optional[INode] = None,
+        lazy: bool = False,
+    ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
             raise Error(f"inum out of range {c_ext.EXT2_BAD_INO}-{self.sb.s_inodes_count}: {inum}")
 
@@ -139,8 +153,7 @@ class ExtFS:
 
         return inode
 
-    @lru_cache(256)
-    def _read_group_desc(self, group_num):
+    def _read_group_desc(self, group_num: int) -> Instance:
         if group_num >= self.groups_count:
             raise Error("Group number exceeds amount of groups")
 
@@ -164,7 +177,14 @@ class ExtFS:
 
 
 class INode:
-    def __init__(self, extfs, inum, filename=None, filetype=None, parent=None):
+    def __init__(
+        self,
+        extfs: ExtFS,
+        inum: int,
+        filename: Optional[str] = None,
+        filetype: Optional[int] = None,
+        parent: Optional[INode] = None,
+    ):
         self.extfs = extfs
         self.inum = inum
         self.parent = parent
@@ -180,7 +200,10 @@ class INode:
         self._dirlist = None
         self._runlist = None
 
-    def _read_inode(self):
+    def __repr__(self) -> str:
+        return f"<inode {self.inum}>"
+
+    def _read_inode(self) -> Instance:
         block_group_num, index = divmod(self.inum - 1, self.extfs.sb.s_inodes_per_group)
         block_group = self.extfs._read_group_desc(block_group_num)
 
@@ -194,25 +217,25 @@ class INode:
         return c_ext.ext4_inode(self.extfs.fh)
 
     @property
-    def inode(self):
+    def inode(self) -> Instance:
         if not self._inode:
             self._inode = self._read_inode()
         return self._inode
 
     @property
-    def size(self):
+    def size(self) -> int:
         if not self._size:
             self._size = (self.inode.i_size_high << 32) + self.inode.i_size_lo
         return self._size
 
     @property
-    def filetype(self):
+    def filetype(self) -> int:
         if not self._filetype:
             self._filetype = stat.S_IFMT(self.inode.i_mode)
         return self._filetype
 
     @property
-    def link(self):
+    def link(self) -> str:
         if self.filetype != stat.S_IFLNK:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
@@ -221,7 +244,7 @@ class INode:
         return self._link
 
     @property
-    def link_inode(self):
+    def link_inode(self) -> INode:
         if not self._link_inode:
             # Relative lookups work because . and .. are actual directory entries
             link = self.link
@@ -233,7 +256,7 @@ class INode:
         return self._link_inode
 
     @property
-    def xattr(self):
+    def xattr(self) -> list[XAttr]:
         if not self._xattr:
             xattr = []
 
@@ -243,8 +266,7 @@ class INode:
                 if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
                     raise Error("Invalid xattr magic value")
 
-                for entry in _iter_xattr(self, buf, len(self.inode.i_extra), 4):
-                    xattr.append(entry)
+                xattr.extend(_iter_xattr(self, buf, len(self.inode.i_extra), 4))
 
             if self.inode.i_file_acl_lo:
                 block = (self.inode.i_file_acl_high << 32) | self.inode.i_file_acl_lo
@@ -255,58 +277,57 @@ class INode:
                 if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
                     raise Error("Invalid xattr magic value")
 
-                for entry in _iter_xattr(self, buf, buf.size):
-                    xattr.append(entry)
+                xattr.extend(_iter_xattr(self, buf, buf.size))
 
             self._xattr = xattr
         return self._xattr
 
     @property
-    def atime(self):
+    def atime(self) -> datetime:
         return ts.from_unix_ns(self.atime_ns)
 
     @property
-    def atime_ns(self):
+    def atime_ns(self) -> int:
         time = self.inode.i_atime
         time_extra = self.inode.i_atime_extra if self.extfs.sb.s_inode_size > 128 else 0
 
         return _parse_ns_ts(time, time_extra)
 
     @property
-    def mtime(self):
+    def mtime(self) -> datetime:
         return ts.from_unix_ns(self.mtime_ns)
 
     @property
-    def mtime_ns(self):
+    def mtime_ns(self) -> int:
         time = self.inode.i_mtime
         time_extra = self.inode.i_mtime_extra if self.extfs.sb.s_inode_size > 128 else 0
 
         return _parse_ns_ts(time, time_extra)
 
     @property
-    def ctime(self):
+    def ctime(self) -> datetime:
         return ts.from_unix_ns(self.ctime_ns)
 
     @property
-    def ctime_ns(self):
+    def ctime_ns(self) -> int:
         time = self.inode.i_ctime
         time_extra = self.inode.i_ctime_extra if self.extfs.sb.s_inode_size > 128 else 0
 
         return _parse_ns_ts(time, time_extra)
 
     @property
-    def dtime(self):
+    def dtime(self) -> datetime:
         return ts.from_unix(self.inode.i_dtime)
 
     @property
-    def crtime(self):
+    def crtime(self) -> Optional[datetime]:
         time_ns = self.crtime_ns
         if time_ns is None:
             return None
         return ts.from_unix_ns(time_ns)
 
     @property
-    def crtime_ns(self):
+    def crtime_ns(self) -> Optional[int]:
         if self.extfs.sb.s_inode_size <= 128:
             return None
 
@@ -315,14 +336,14 @@ class INode:
 
         return _parse_ns_ts(time, time_extra)
 
-    def listdir(self):
+    def listdir(self) -> dict[str, INode]:
         if not self._dirlist:
             self._dirlist = {node.filename: node for node in self.iterdir()}
         return self._dirlist
 
     dirlist = listdir
 
-    def iterdir(self):
+    def iterdir(self) -> Iterator[INode]:
         if self.filetype != stat.S_IFDIR:
             raise NotADirectoryError(f"{self!r} is not a directory")
 
@@ -349,7 +370,7 @@ class INode:
             offset += direntry.rec_len
             buf.seek(offset)
 
-    def dataruns(self):
+    def dataruns(self) -> list[tuple[Optional[int], int]]:
         if not self._runlist:
             if self.inode.i_flags & c_ext.EXT4_EXTENTS_FL:
                 buf = io.BytesIO(self.inode.i_block)
@@ -424,7 +445,7 @@ class INode:
 
         return self._runlist
 
-    def open(self):
+    def open(self) -> BinaryIO:
         if self.inode.i_flags & c_ext.EXT4_INLINE_DATA_FL or self.filetype == stat.S_IFLNK and self.size < 60:
             buf = io.BytesIO(memoryview(self.inode.i_block)[: self.size])
             # Need to add a size attribute to maintain compatibility with dissect streams
@@ -432,12 +453,9 @@ class INode:
             return buf
         return RunlistStream(self.extfs.fh, self.dataruns(), self.size, self.extfs.block_size)
 
-    def __repr__(self):
-        return f"<inode {self.inum}>"
-
 
 class XAttr:
-    def __init__(self, extfs, inode, entry, value):
+    def __init__(self, extfs: ExtFS, inode: INode, entry: Instance, value: bytes):
         self.extfs = extfs
         self.inode = inode
         self.entry = entry
@@ -447,11 +465,11 @@ class XAttr:
         self.name = self.prefix + self._name
         self.value = value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<xattr name={self.name} value={self.value} inode={self.inode}>"
 
 
-def _parse_indirect(inode, offset, num_blocks, level):
+def _parse_indirect(inode: INode, offset: int, num_blocks: int, level: int) -> list[int]:
     offsets_per_block = inode.extfs.block_size // 4
 
     if level == 1:
@@ -475,7 +493,7 @@ def _parse_indirect(inode, offset, num_blocks, level):
         return blocks
 
 
-def _parse_extents(inode, buf):
+def _parse_extents(inode: INode, buf: bytes) -> Iterator[Instance]:
     extent_header = c_ext.ext4_extent_header(buf)
 
     if extent_header.eh_magic != 0xF30A:
@@ -493,11 +511,10 @@ def _parse_extents(inode, buf):
             fh = inode.extfs.fh
             fh.seek(child * inode.extfs.block_size)
             blockbuf = io.BytesIO(fh.read(inode.extfs.block_size))
-            for extent in _parse_extents(inode, blockbuf):
-                yield extent
+            yield from _parse_extents(inode, blockbuf)
 
 
-def _iter_xattr(inode, buf, end, value_offset=0):
+def _iter_xattr(inode: INode, buf: BinaryIO, end: int, value_offset: int = 0) -> Iterator[XAttr]:
     offset = buf.tell()
     while True:
         try:
@@ -523,7 +540,7 @@ def _iter_xattr(inode, buf, end, value_offset=0):
             break
 
 
-def _parse_ns_ts(time, time_extra):
+def _parse_ns_ts(time: int, time_extra: int) -> int:
     # The low 2 bits of time_extra are used to extend the time field
     # The remaining 30 bits are nanoseconds
     time |= (time_extra & 0b11) << 32

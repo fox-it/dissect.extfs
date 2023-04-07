@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import datetime
 import io
+from typing import BinaryIO, Iterator, Optional
 
+from dissect.cstruct import Instance
 from dissect.util.stream import RangeStream
 
 from dissect.extfs.c_jdb2 import c_jdb2
@@ -8,7 +12,7 @@ from dissect.extfs.exceptions import Error
 
 
 class JDB2:
-    def __init__(self, fh):
+    def __init__(self, fh: BinaryIO):
         self.fh = fh
 
         sb = c_jdb2.journal_superblock(self.fh)
@@ -22,12 +26,12 @@ class JDB2:
         if sb.s_feature_incompat & c_jdb2.JBD2_FEATURE_INCOMPAT_CSUM_V3:
             self._blocktag = c_jdb2.journal_block_tag3
 
-    def read_block(self, block, count=1):
+    def read_block(self, block: int, count: int = 1) -> bytes:
         offset = block * self.block_size
         self.fh.seek(offset)
         return self.fh.read(self.block_size * count)
 
-    def commits(self):
+    def commits(self) -> Iterator[CommitBlock]:
         cur_seq = None
 
         for block in self.commits_all():
@@ -38,7 +42,7 @@ class JDB2:
                 cur_seq += 1
                 yield block
 
-    def commits_all(self):
+    def commits_all(self) -> Iterator[CommitBlock]:
         desc_buf = {}
 
         for block in self.walk():
@@ -55,7 +59,7 @@ class JDB2:
 
                 yield block
 
-    def walk(self):
+    def walk(self) -> Iterator[CommitBlock]:
         block_num = self.sb.s_first
 
         while block_num < self.sb.s_maxlen - 1:
@@ -79,14 +83,17 @@ class JDB2:
 
 
 class DescriptorBlock:
-    def __init__(self, jdb2, header, block):
+    def __init__(self, jdb2: JDB2, header: Instance, block: int):
         self.jdb2 = jdb2
         self.header = header
         self.journal_block = block
 
         self.sequence = self.header.h_sequence
 
-    def tags(self):
+    def __repr__(self) -> str:
+        return f"<descriptor_block sequence={self.sequence} journal_block={self.journal_block}>"
+
+    def tags(self) -> Iterator[DescriptorBlockTag]:
         self.jdb2.fh.seek((self.journal_block * self.jdb2.block_size) + c_jdb2.journal_header.size)
 
         block_count = 1
@@ -101,28 +108,27 @@ class DescriptorBlock:
                 self.jdb2.fh.seek(16, io.SEEK_CUR)
             block_count += 1
 
-    def __repr__(self):
-        return f"<descriptor_block sequence={self.sequence} journal_block={self.journal_block}>"
-
 
 class DescriptorBlockTag:
-    def __init__(self, descriptor, tag, journal_block):
+    def __init__(self, descriptor: DescriptorBlock, tag: Instance, journal_block: int):
         self.descriptor = descriptor
         self.tag = tag
         self.journal_block = journal_block
 
         self.block = (self.tag.t_blocknr_high << 32) | self.tag.t_blocknr
 
-    def open(self):
+    def __repr__(self) -> str:
+        return f"<block_tag block={self.block} journal_block={self.journal_block} flags=0x{self.tag.t_flags:x}>"
+
+    def open(self) -> BinaryIO:
         block_size = self.descriptor.jdb2.block_size
         return RangeStream(self.descriptor.jdb2.fh, self.journal_block * block_size, block_size)
 
-    def __repr__(self):
-        return f"<block_tag block={self.block} journal_block={self.journal_block} flags=0x{self.tag.t_flags:x}>"
-
 
 class CommitBlock:
-    def __init__(self, jdb2, header, journal_block, descriptors=None):
+    def __init__(
+        self, jdb2: JDB2, header: Instance, journal_block: int, descriptors: Optional[list[DescriptorBlock]] = None
+    ):
         self.jdb2 = jdb2
         self.header = header
         self.journal_block = journal_block
@@ -132,7 +138,7 @@ class CommitBlock:
         self.ts = datetime.datetime.utcfromtimestamp(self.header.h_commit_sec)
         self.ts += datetime.timedelta(microseconds=self.header.h_commit_nsec // 1000)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"<commit sequence={self.sequence} journal_block={self.journal_block} "
             f"ts={self.ts} num_descriptors={len(self.descriptors)}>"

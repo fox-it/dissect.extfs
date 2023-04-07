@@ -2,6 +2,8 @@ import datetime
 import gzip
 import stat
 from io import BytesIO
+from logging import Logger
+from typing import BinaryIO
 from unittest.mock import call, patch
 
 import pytest
@@ -9,7 +11,7 @@ import pytest
 from dissect.extfs import INode, c_ext, extfs
 
 
-def test_ext4(ext4_simple):
+def test_ext4(ext4_simple: BinaryIO):
     e = extfs.ExtFS(ext4_simple)
 
     assert e.type == extfs.EXT4
@@ -39,7 +41,7 @@ def test_ext4(ext4_simple):
     assert len(list(e.journal.commits())) == 2
 
 
-def test_xattr(ext4_simple):
+def test_xattr(ext4_simple: BinaryIO):
     e = extfs.ExtFS(ext4_simple)
 
     inode = e.get("xattr_cap")
@@ -60,7 +62,7 @@ def test_xattr(ext4_simple):
         ("tests/data/ext4_symlink_test3.bin.gz"),
     ],
 )
-def test_symlinks(image_file):
+def test_symlinks(image_file: str):
     path = "/path/to/dir/with/file.ext"
     expect = b"resolved!\n"
 
@@ -76,7 +78,7 @@ def test_symlinks(image_file):
 @patch("dissect.extfs.extfs.INode.open", return_value=BytesIO(b"\x00" * 16))
 @patch("dissect.extfs.extfs.log", create=True, return_value=None)
 @patch("dissect.extfs.extfs.ExtFS")
-def test_infinite_loop_protection(ExtFS, log, *args):
+def test_infinite_loop_protection(ExtFS: extfs.ExtFS, log: Logger, *args):
     ExtFS.sb.s_inodes_count = 69
     ExtFS._dirtype = c_ext.c_ext.ext2_dir_entry_2
     inode = INode(ExtFS, 1, filetype=stat.S_IFDIR)
