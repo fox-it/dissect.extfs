@@ -21,6 +21,7 @@ def test_ext4(ext4_bin: BinaryIO):
     assert extfs.groups_offset == 2048
     assert extfs._group_desc_size == 64
     assert str(extfs.uuid) == "ab98e08e-e2da-4bc9-bfc6-1ac5eafb1001"
+    assert extfs.volume_name == ""
     assert extfs.last_mount == "/tmp/mnt"
 
     root = extfs.root

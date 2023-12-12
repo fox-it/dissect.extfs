@@ -90,6 +90,7 @@ class ExtFS:
         self.groups_count = ((self.last_block - sb.s_first_data_block) // sb.s_blocks_per_group) + 1
 
         self.uuid = UUID(bytes=sb.s_uuid)
+        self.volume_name = sb.s_volume_name.split(b"\x00")[0].decode(errors="surrogateescape")
         self.last_mount = sb.s_last_mounted.split(b"\x00")[0].decode(errors="surrogateescape")
 
         self.root = self.get_inode(c_ext.EXT2_ROOT_INO, "/")
