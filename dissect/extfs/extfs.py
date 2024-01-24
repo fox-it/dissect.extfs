@@ -475,6 +475,8 @@ def _parse_indirect(inode: INode, offset: int, num_blocks: int, level: int) -> l
 
     if level == 1:
         read_blocks = min(num_blocks, offsets_per_block)
+        if offset == 0:
+            return [0] * read_blocks
         inode.extfs.fh.seek(offset * inode.extfs.block_size)
         return c_ext.uint32[read_blocks](inode.extfs.fh)
     else:
