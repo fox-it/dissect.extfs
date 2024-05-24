@@ -4,7 +4,6 @@ import datetime
 import io
 from typing import BinaryIO, Iterator, Optional
 
-from dissect.cstruct import Instance
 from dissect.util.stream import RangeStream
 
 from dissect.extfs.c_jdb2 import c_jdb2
@@ -83,7 +82,7 @@ class JDB2:
 
 
 class DescriptorBlock:
-    def __init__(self, jdb2: JDB2, header: Instance, block: int):
+    def __init__(self, jdb2: JDB2, header: c_jdb2.journal_header, block: int):
         self.jdb2 = jdb2
         self.header = header
         self.journal_block = block
@@ -110,7 +109,9 @@ class DescriptorBlock:
 
 
 class DescriptorBlockTag:
-    def __init__(self, descriptor: DescriptorBlock, tag: Instance, journal_block: int):
+    def __init__(
+        self, descriptor: DescriptorBlock, tag: c_jdb2.journal_block_tag | c_jdb2.journal_block_tag3, journal_block: int
+    ):
         self.descriptor = descriptor
         self.tag = tag
         self.journal_block = journal_block
@@ -127,7 +128,11 @@ class DescriptorBlockTag:
 
 class CommitBlock:
     def __init__(
-        self, jdb2: JDB2, header: Instance, journal_block: int, descriptors: Optional[list[DescriptorBlock]] = None
+        self,
+        jdb2: JDB2,
+        header: c_jdb2.commit_header,
+        journal_block: int,
+        descriptors: Optional[list[DescriptorBlock]] = None,
     ):
         self.jdb2 = jdb2
         self.header = header

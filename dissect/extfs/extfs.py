@@ -9,7 +9,6 @@ from functools import lru_cache
 from typing import BinaryIO, Iterator, Optional, Union
 from uuid import UUID
 
-from dissect.cstruct import Instance
 from dissect.util import ts
 from dissect.util.stream import RangeStream, RunlistStream
 
@@ -154,7 +153,7 @@ class ExtFS:
 
         return inode
 
-    def _read_group_desc(self, group_num: int) -> Instance:
+    def _read_group_desc(self, group_num: int) -> c_ext.ext2_group_desc | c_ext.ext4_group_desc:
         if group_num >= self.groups_count:
             raise Error("Group number exceeds amount of groups")
 
@@ -204,7 +203,7 @@ class INode:
     def __repr__(self) -> str:
         return f"<inode {self.inum}>"
 
-    def _read_inode(self) -> Instance:
+    def _read_inode(self) -> c_ext.ext4_inode:
         block_group_num, index = divmod(self.inum - 1, self.extfs.sb.s_inodes_per_group)
         block_group = self.extfs._read_group_desc(block_group_num)
 
@@ -218,7 +217,7 @@ class INode:
         return c_ext.ext4_inode(self.extfs.fh)
 
     @property
-    def inode(self) -> Instance:
+    def inode(self) -> c_ext.ext4_inode:
         if not self._inode:
             self._inode = self._read_inode()
         return self._inode
@@ -456,7 +455,7 @@ class INode:
 
 
 class XAttr:
-    def __init__(self, extfs: ExtFS, inode: INode, entry: Instance, value: bytes):
+    def __init__(self, extfs: ExtFS, inode: INode, entry: c_ext.ext4_xattr_entry, value: bytes):
         self.extfs = extfs
         self.inode = inode
         self.entry = entry
@@ -496,7 +495,7 @@ def _parse_indirect(inode: INode, offset: int, num_blocks: int, level: int) -> l
         return blocks
 
 
-def _parse_extents(inode: INode, buf: bytes) -> Iterator[Instance]:
+def _parse_extents(inode: INode, buf: bytes) -> Iterator[c_ext.ext4_extent]:
     extent_header = c_ext.ext4_extent_header(buf)
 
     if extent_header.eh_magic != 0xF30A:
