@@ -1,6 +1,6 @@
 import stat
 
-from dissect import cstruct
+from dissect.cstruct import cstruct
 
 ext_def = """
 #define EXT2_SBOFF              1024        // offset to superblock
@@ -397,8 +397,7 @@ struct ext4_xattr_entry {
 };
 """
 
-c_ext = cstruct.cstruct()
-c_ext.load(ext_def)
+c_ext = cstruct().load(ext_def)
 
 EXT2 = 2
 EXT3 = 3

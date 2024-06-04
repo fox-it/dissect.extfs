@@ -1,4 +1,4 @@
-from dissect import cstruct
+from dissect.cstruct import cstruct
 
 jdb2_def = """
 #define JBD2_MAGIC_NUMBER                   0xC03B3998
@@ -87,5 +87,4 @@ struct journal_block_tag3 {
 };
 """
 
-c_jdb2 = cstruct.cstruct(endian=">")
-c_jdb2.load(jdb2_def)
+c_jdb2 = cstruct(endian=">").load(jdb2_def)
