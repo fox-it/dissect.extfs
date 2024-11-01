@@ -2,11 +2,15 @@ class Error(Exception):
     pass
 
 
-class FileNotFoundError(Error):
+class FileNotFoundError(Error, FileNotFoundError):
     pass
 
 
-class NotADirectoryError(Error):
+class IsADirectoryError(Error, IsADirectoryError):
+    pass
+
+
+class NotADirectoryError(Error, NotADirectoryError):
     pass
 
 
