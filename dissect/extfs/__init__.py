@@ -8,11 +8,11 @@ from dissect.extfs.extfs import ExtFS, INode
 from dissect.extfs.journal import JDB2
 
 __all__ = [
-    "ExtFS",
-    "INode",
     "JDB2",
     "Error",
+    "ExtFS",
     "FileNotFoundError",
+    "INode",
     "NotADirectoryError",
     "NotASymlinkError",
 ]

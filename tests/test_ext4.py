@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import datetime
 import gzip
 import stat
 from io import BytesIO
-from logging import Logger
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 from unittest.mock import call, patch
 
 import pytest
@@ -11,8 +12,11 @@ import pytest
 from dissect.extfs.c_ext import c_ext
 from dissect.extfs.extfs import EXT4, ExtFS, INode
 
+if TYPE_CHECKING:
+    from logging import Logger
 
-def test_ext4(ext4_bin: BinaryIO):
+
+def test_ext4(ext4_bin: BinaryIO) -> None:
     extfs = ExtFS(ext4_bin)
 
     assert extfs.type == EXT4
@@ -43,7 +47,7 @@ def test_ext4(ext4_bin: BinaryIO):
     assert len(list(extfs.journal.commits())) == 2
 
 
-def test_xattr(ext4_bin: BinaryIO):
+def test_xattr(ext4_bin: BinaryIO) -> None:
     e = ExtFS(ext4_bin)
 
     inode = e.get("xattr_cap")
@@ -56,7 +60,7 @@ def test_xattr(ext4_bin: BinaryIO):
     assert xattrs[1].value == b"\x01\x00\x00\x02\x00\x04@\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
 
-def test_sparse(ext4_sparse_bin: BinaryIO):
+def test_sparse(ext4_sparse_bin: BinaryIO) -> None:
     extfs = ExtFS(ext4_sparse_bin)
 
     sparse_start = extfs.get("sparse_start")
@@ -84,11 +88,11 @@ def test_sparse(ext4_sparse_bin: BinaryIO):
         ("tests/data/ext4_symlink_test3.bin.gz"),
     ],
 )
-def test_symlinks(image_file: str):
+def test_symlinks(image_file: str) -> None:
     path = "/path/to/dir/with/file.ext"
     expect = b"resolved!\n"
 
-    def resolve(node):
+    def resolve(node: INode) -> INode:
         while node.filetype == stat.S_IFLNK:
             node = node.link_inode
         return node
@@ -100,7 +104,7 @@ def test_symlinks(image_file: str):
 @patch("dissect.extfs.extfs.INode.open", return_value=BytesIO(b"\x00" * 16))
 @patch("dissect.extfs.extfs.log", create=True, return_value=None)
 @patch("dissect.extfs.extfs.ExtFS")
-def test_infinite_loop_protection(ExtFS: ExtFS, log: Logger, *args):
+def test_infinite_loop_protection(ExtFS: ExtFS, log: Logger, *args) -> None:
     ExtFS.sb.s_inodes_count = 69
     ExtFS._dirtype = c_ext.ext2_dir_entry_2
     inode = INode(ExtFS, 1, filetype=stat.S_IFDIR)

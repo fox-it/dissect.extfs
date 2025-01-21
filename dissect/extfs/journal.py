@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import datetime
 import io
-from typing import BinaryIO, Iterator, Optional
+from typing import TYPE_CHECKING, BinaryIO
 
 from dissect.util.stream import RangeStream
 
 from dissect.extfs.c_jdb2 import c_jdb2
 from dissect.extfs.exceptions import Error
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class JDB2:
@@ -132,7 +135,7 @@ class CommitBlock:
         jdb2: JDB2,
         header: c_jdb2.commit_header,
         journal_block: int,
-        descriptors: Optional[list[DescriptorBlock]] = None,
+        descriptors: list[DescriptorBlock] | None = None,
     ):
         self.jdb2 = jdb2
         self.header = header
@@ -140,7 +143,7 @@ class CommitBlock:
         self.descriptors = descriptors if descriptors else []
 
         self.sequence = self.header.h_sequence
-        self.ts = datetime.datetime.utcfromtimestamp(self.header.h_commit_sec)
+        self.ts = datetime.datetime.fromtimestamp(self.header.h_commit_sec, tz=datetime.timezone.utc)
         self.ts += datetime.timedelta(microseconds=self.header.h_commit_nsec // 1000)
 
     def __repr__(self) -> str:

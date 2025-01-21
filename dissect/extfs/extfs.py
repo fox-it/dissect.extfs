@@ -4,9 +4,8 @@ import io
 import logging
 import os
 import stat
-from datetime import datetime
 from functools import lru_cache
-from typing import BinaryIO, Iterator, Optional, Union
+from typing import TYPE_CHECKING, BinaryIO
 from uuid import UUID
 
 from dissect.util import ts
@@ -28,6 +27,10 @@ from dissect.extfs.exceptions import (
     NotASymlinkError,
 )
 from dissect.extfs.journal import JDB2
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from datetime import datetime
 
 log = logging.getLogger(__name__)
 log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
@@ -114,7 +117,7 @@ class ExtFS:
 
         return self._journal
 
-    def get(self, path: Union[str, int], node: Optional[INode] = None) -> INode:
+    def get(self, path: str | int, node: INode | None = None) -> INode:
         if isinstance(path, int):
             return self.get_inode(path)
 
@@ -139,9 +142,9 @@ class ExtFS:
     def get_inode(
         self,
         inum: int,
-        filename: Optional[str] = None,
-        filetype: Optional[int] = None,
-        parent: Optional[INode] = None,
+        filename: str | None = None,
+        filetype: int | None = None,
+        parent: INode | None = None,
         lazy: bool = False,
     ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
@@ -181,9 +184,9 @@ class INode:
         self,
         extfs: ExtFS,
         inum: int,
-        filename: Optional[str] = None,
-        filetype: Optional[int] = None,
-        parent: Optional[INode] = None,
+        filename: str | None = None,
+        filetype: int | None = None,
+        parent: INode | None = None,
     ):
         self.extfs = extfs
         self.inum = inum
@@ -248,10 +251,7 @@ class INode:
         if not self._link_inode:
             # Relative lookups work because . and .. are actual directory entries
             link = self.link
-            if link.startswith("/"):
-                relnode = None
-            else:
-                relnode = self.parent
+            relnode = None if link.startswith("/") else self.parent
             self._link_inode = self.extfs.get(self.link, relnode)
         return self._link_inode
 
@@ -320,14 +320,14 @@ class INode:
         return ts.from_unix(self.inode.i_dtime)
 
     @property
-    def crtime(self) -> Optional[datetime]:
+    def crtime(self) -> datetime | None:
         time_ns = self.crtime_ns
         if time_ns is None:
             return None
         return ts.from_unix_ns(time_ns)
 
     @property
-    def crtime_ns(self) -> Optional[int]:
+    def crtime_ns(self) -> int | None:
         if self.extfs.sb.s_inode_size <= 128:
             return None
 
@@ -370,7 +370,7 @@ class INode:
             offset += direntry.rec_len
             buf.seek(offset)
 
-    def dataruns(self) -> list[tuple[Optional[int], int]]:
+    def dataruns(self) -> list[tuple[int | None, int]]:
         if not self._runlist:
             expected_runs = (self.size + self.extfs.block_size - 1) // self.extfs.block_size
 
@@ -446,7 +446,7 @@ class INode:
         return self._runlist
 
     def open(self) -> BinaryIO:
-        if self.inode.i_flags & c_ext.EXT4_INLINE_DATA_FL or self.filetype == stat.S_IFLNK and self.size < 60:
+        if self.inode.i_flags & c_ext.EXT4_INLINE_DATA_FL or (self.filetype == stat.S_IFLNK and self.size < 60):
             buf = io.BytesIO(memoryview(self.inode.i_block)[: self.size])
             # Need to add a size attribute to maintain compatibility with dissect streams
             buf.size = self.size
@@ -478,21 +478,21 @@ def _parse_indirect(inode: INode, offset: int, num_blocks: int, level: int) -> l
             return [0] * read_blocks
         inode.extfs.fh.seek(offset * inode.extfs.block_size)
         return c_ext.uint32[read_blocks](inode.extfs.fh)
-    else:
-        blocks = []
 
-        max_level_blocks = offsets_per_block**level
-        blocks_per_nest = max_level_blocks // offsets_per_block
-        read_blocks = (num_blocks + blocks_per_nest - 1) // blocks_per_nest
-        read_blocks = min(read_blocks, offsets_per_block)
+    blocks = []
 
-        inode.extfs.fh.seek(offset * inode.extfs.block_size)
-        for addr in c_ext.uint32[read_blocks](inode.extfs.fh):
-            parsed_blocks = _parse_indirect(inode, addr, num_blocks, level - 1)
-            num_blocks -= len(parsed_blocks)
-            blocks.extend(parsed_blocks)
+    max_level_blocks = offsets_per_block**level
+    blocks_per_nest = max_level_blocks // offsets_per_block
+    read_blocks = (num_blocks + blocks_per_nest - 1) // blocks_per_nest
+    read_blocks = min(read_blocks, offsets_per_block)
 
-        return blocks
+    inode.extfs.fh.seek(offset * inode.extfs.block_size)
+    for addr in c_ext.uint32[read_blocks](inode.extfs.fh):
+        parsed_blocks = _parse_indirect(inode, addr, num_blocks, level - 1)
+        num_blocks -= len(parsed_blocks)
+        blocks.extend(parsed_blocks)
+
+    return blocks
 
 
 def _parse_extents(inode: INode, buf: bytes) -> Iterator[c_ext.ext4_extent]:
