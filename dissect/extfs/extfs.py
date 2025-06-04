@@ -39,7 +39,6 @@ log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
 class ExtFS:
     def __init__(self, fh: BinaryIO):
         self.fh = fh
-        # self._path_cache = {}
         self._journal = None
 
         fh.seek(c_ext.EXT2_SBOFF)
@@ -123,12 +122,9 @@ class ExtFS:
 
         node = node if node else self.root
         parts = path_or_inum.split("/")
-        for part_num, part in enumerate(parts):
+        for _, part in enumerate(parts):
             if not part:
                 continue
-
-            while node.filetype == stat.S_IFLNK and part_num < len(parts):
-                node = node.link_inode
 
             for entry in node.iterdir():
                 if entry.filename == part:
@@ -144,13 +140,12 @@ class ExtFS:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        parentInum: int | None = None,
         lazy: bool = False,
     ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
             raise Error(f"inum out of range {c_ext.EXT2_BAD_INO}-{self.sb.s_inodes_count}: {inum}")
 
-        inode = INode(self, inum, filename, filetype, parentInum)
+        inode = INode(self, inum, filename, filetype)
         if not lazy:
             inode._inode = inode._read_inode()
 
@@ -186,11 +181,9 @@ class INode:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        parentInum: int | None = None,
     ):
         self.extfs = extfs
         self.inum = inum
-        self.parentInum = parentInum
         self._inode = None
 
         self.filename = filename
@@ -244,17 +237,6 @@ class INode:
         if not self._link:
             self._link = self.open().read().decode(errors="surrogateescape")
         return self._link
-
-    @property
-    def link_inode(self) -> INode:
-        if not self._link_inum:
-            # Relative lookups work because . and .. are actual directory entries
-            link = self.link
-            relnode = None if link.startswith("/") else self.extfs.get(self.parentInum)
-            target = self.extfs.get(self.link, relnode)
-            self._link_inum = target.inum
-            return target
-        return self.extfs.get_inode(self._link_inum)
 
     @property
     def xattr(self) -> list[XAttr]:
@@ -364,7 +346,7 @@ class INode:
                 if ftype:
                     ftype = FILETYPES[ftype]
 
-                yield self.extfs.get_inode(direntry.inode, fname, ftype, parentInum=self.inum, lazy=True)
+                yield self.extfs.get_inode(direntry.inode, fname, ftype, lazy=True)
 
             offset += direntry.rec_len
             buf.seek(offset)
