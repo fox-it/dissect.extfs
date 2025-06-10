@@ -122,7 +122,7 @@ class ExtFS:
 
         node = node if node else self.root
         parts = path_or_inum.split("/")
-        for _, part in enumerate(parts):
+        for part in parts:
             if not part:
                 continue
 
@@ -190,7 +190,6 @@ class INode:
         self._filetype = filetype
         self._size = None
         self._link = None
-        self._link_inum: int | None = None
         self._xattr = None
 
         self._runlist = None
