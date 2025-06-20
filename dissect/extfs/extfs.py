@@ -39,7 +39,6 @@ log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
 class ExtFS:
     def __init__(self, fh: BinaryIO):
         self.fh = fh
-        # self._path_cache = {}
         self._journal = None
 
         fh.seek(c_ext.EXT2_SBOFF)
@@ -117,25 +116,22 @@ class ExtFS:
 
         return self._journal
 
-    def get(self, path: str | int, node: INode | None = None) -> INode:
-        if isinstance(path, int):
-            return self.get_inode(path)
+    def get(self, path_or_inum: str | int, node: INode | None = None) -> INode:
+        if isinstance(path_or_inum, int):
+            return self.get_inode(path_or_inum)
 
         node = node if node else self.root
-        parts = path.split("/")
-        for part_num, part in enumerate(parts):
+        parts = path_or_inum.split("/")
+        for part in parts:
             if not part:
                 continue
-
-            while node.filetype == stat.S_IFLNK and part_num < len(parts):
-                node = node.link_inode
 
             for entry in node.iterdir():
                 if entry.filename == part:
                     node = entry
                     break
             else:
-                raise FileNotFoundError(f"File not found: {path}")
+                raise FileNotFoundError(f"File not found: {path_or_inum}")
 
         return node
 
@@ -144,13 +140,12 @@ class ExtFS:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        parent: INode | None = None,
         lazy: bool = False,
     ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
             raise Error(f"inum out of range {c_ext.EXT2_BAD_INO}-{self.sb.s_inodes_count}: {inum}")
 
-        inode = INode(self, inum, filename, filetype, parent=parent)
+        inode = INode(self, inum, filename, filetype)
         if not lazy:
             inode._inode = inode._read_inode()
 
@@ -186,21 +181,17 @@ class INode:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        parent: INode | None = None,
     ):
         self.extfs = extfs
         self.inum = inum
-        self.parent = parent
         self._inode = None
 
         self.filename = filename
         self._filetype = filetype
         self._size = None
         self._link = None
-        self._link_inode = None
         self._xattr = None
 
-        self._dirlist = None
         self._runlist = None
 
     def __repr__(self) -> str:
@@ -245,15 +236,6 @@ class INode:
         if not self._link:
             self._link = self.open().read().decode(errors="surrogateescape")
         return self._link
-
-    @property
-    def link_inode(self) -> INode:
-        if not self._link_inode:
-            # Relative lookups work because . and .. are actual directory entries
-            link = self.link
-            relnode = None if link.startswith("/") else self.parent
-            self._link_inode = self.extfs.get(self.link, relnode)
-        return self._link_inode
 
     @property
     def xattr(self) -> list[XAttr]:
@@ -337,9 +319,7 @@ class INode:
         return _parse_ns_ts(time, time_extra)
 
     def listdir(self) -> dict[str, INode]:
-        if not self._dirlist:
-            self._dirlist = {node.filename: node for node in self.iterdir()}
-        return self._dirlist
+        return {node.filename: node for node in self.iterdir()}
 
     dirlist = listdir
 
@@ -365,7 +345,7 @@ class INode:
                 if ftype:
                     ftype = FILETYPES[ftype]
 
-                yield self.extfs.get_inode(direntry.inode, fname, ftype, parent=self, lazy=True)
+                yield self.extfs.get_inode(direntry.inode, fname, ftype, lazy=True)
 
             offset += direntry.rec_len
             buf.seek(offset)
