@@ -4,7 +4,7 @@ import io
 import logging
 import os
 import stat
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, BinaryIO
 from uuid import UUID
 
@@ -147,7 +147,7 @@ class ExtFS:
 
         inode = INode(self, inum, filename, filetype)
         if not lazy:
-            inode._inode = inode._read_inode()
+            _ = inode.inode  # Warm up the cache
 
         return inode
 
@@ -184,20 +184,15 @@ class INode:
     ):
         self.extfs = extfs
         self.inum = inum
-        self._inode = None
-
         self.filename = filename
         self._filetype = filetype
-        self._size = None
-        self._link = None
-        self._xattr = None
-
         self._runlist = None
 
     def __repr__(self) -> str:
         return f"<inode {self.inum}>"
 
-    def _read_inode(self) -> c_ext.ext4_inode:
+    @cached_property
+    def inode(self) -> c_ext.ext4_inode:
         block_group_num, index = divmod(self.inum - 1, self.extfs.sb.s_inodes_per_group)
         block_group = self.extfs._read_group_desc(block_group_num)
 
@@ -210,17 +205,9 @@ class INode:
         self.extfs.fh.seek(offset)
         return c_ext.ext4_inode(self.extfs.fh)
 
-    @property
-    def inode(self) -> c_ext.ext4_inode:
-        if not self._inode:
-            self._inode = self._read_inode()
-        return self._inode
-
-    @property
+    @cached_property
     def size(self) -> int:
-        if not self._size:
-            self._size = (self.inode.i_size_high << 32) + self.inode.i_size_lo
-        return self._size
+        return (self.inode.i_size_high << 32) + self.inode.i_size_lo
 
     @property
     def filetype(self) -> int:
@@ -228,41 +215,37 @@ class INode:
             self._filetype = stat.S_IFMT(self.inode.i_mode)
         return self._filetype
 
-    @property
+    @cached_property
     def link(self) -> str:
         if self.filetype != stat.S_IFLNK:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
-        if not self._link:
-            self._link = self.open().read().decode(errors="surrogateescape")
-        return self._link
+        return self.open().read().decode(errors="surrogateescape")
 
-    @property
+    @cached_property
     def xattr(self) -> list[XAttr]:
-        if not self._xattr:
-            xattr = []
+        xattr = []
 
-            if self.inode.i_extra.strip(b"\x00"):
-                buf = io.BytesIO(self.inode.i_extra)
-                hdr = c_ext.ext4_xattr_ibody_header(buf)
-                if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
-                    raise Error("Invalid xattr magic value")
+        if self.inode.i_extra.strip(b"\x00"):
+            buf = io.BytesIO(self.inode.i_extra)
+            hdr = c_ext.ext4_xattr_ibody_header(buf)
+            if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
+                raise Error("Invalid xattr magic value")
 
-                xattr.extend(_iter_xattr(self, buf, len(self.inode.i_extra), 4))
+            xattr.extend(_iter_xattr(self, buf, len(self.inode.i_extra), 4))
 
-            if self.inode.i_file_acl_lo:
-                block = (self.inode.i_file_acl_high << 32) | self.inode.i_file_acl_lo
-                block_offset = block * self.extfs.block_size
+        if self.inode.i_file_acl_lo:
+            block = (self.inode.i_file_acl_high << 32) | self.inode.i_file_acl_lo
+            block_offset = block * self.extfs.block_size
 
-                buf = RangeStream(self.extfs.fh, block_offset, self.extfs.block_size)
-                hdr = c_ext.ext4_xattr_header(buf)
-                if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
-                    raise Error("Invalid xattr magic value")
+            buf = RangeStream(self.extfs.fh, block_offset, self.extfs.block_size)
+            hdr = c_ext.ext4_xattr_header(buf)
+            if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
+                raise Error("Invalid xattr magic value")
 
-                xattr.extend(_iter_xattr(self, buf, buf.size))
+            xattr.extend(_iter_xattr(self, buf, buf.size))
 
-            self._xattr = xattr
-        return self._xattr
+        return xattr
 
     @property
     def atime(self) -> datetime:

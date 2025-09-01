@@ -91,7 +91,7 @@ def test_infinite_loop_protection(ExtFS: ExtFS, log: Logger, *args) -> None:
     ExtFS.sb.s_inodes_count = 69
     ExtFS._dirtype = c_ext.ext2_dir_entry_2
     inode = INode(ExtFS, 1, filetype=stat.S_IFDIR)
-    inode._size = 16
+    inode.size = 16
     for _ in inode.iterdir():
         pass
     assert call.critical("Zero-length directory entry in %s (offset 0x%x)", inode, 0) in log.mock_calls
