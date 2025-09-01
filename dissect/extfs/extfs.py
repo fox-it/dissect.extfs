@@ -39,7 +39,6 @@ log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
 class ExtFS:
     def __init__(self, fh: BinaryIO):
         self.fh = fh
-        self._journal = None
 
         fh.seek(c_ext.EXT2_SBOFF)
         sb = c_ext.ext4_super_block(fh)
@@ -99,22 +98,17 @@ class ExtFS:
         self.get_inode = lru_cache(1024)(self.get_inode)
         self._read_group_desc = lru_cache(356)(self._read_group_desc)
 
-    @property
+    @cached_property
     def journal(self) -> JDB2:
-        if not self._journal:
-            if not self.sb.s_feature_compat & c_ext.EXT3_FEATURE_COMPAT_HAS_JOURNAL:
-                raise Error("Journal not supported")
+        if not self.sb.s_feature_compat & c_ext.EXT3_FEATURE_COMPAT_HAS_JOURNAL:
+            raise Error("Journal not supported")
 
-            inum = self.sb.s_journal_inum
-            if inum == 0:
-                raise Error(
-                    f"Journal inum is 0, could be on external device (s_journal_uuid = {self.sb.s_journal_uuid})"
-                )
+        inum = self.sb.s_journal_inum
+        if inum == 0:
+            raise Error(f"Journal inum is 0, could be on external device (s_journal_uuid = {self.sb.s_journal_uuid})")
 
-            inode = self.get_inode(inum)
-            self._journal = JDB2(inode.open())
-
-        return self._journal
+        inode = self.get_inode(inum)
+        return JDB2(inode.open())
 
     def get(self, path_or_inum: str | int, node: INode | None = None) -> INode:
         if isinstance(path_or_inum, int):
