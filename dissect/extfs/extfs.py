@@ -4,7 +4,7 @@ import io
 import logging
 import os
 import stat
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, BinaryIO
 from uuid import UUID
 
@@ -39,7 +39,6 @@ log.setLevel(os.getenv("DISSECT_LOG_EXTFS", "CRITICAL"))
 class ExtFS:
     def __init__(self, fh: BinaryIO):
         self.fh = fh
-        self._journal = None
 
         fh.seek(c_ext.EXT2_SBOFF)
         sb = c_ext.ext4_super_block(fh)
@@ -99,22 +98,17 @@ class ExtFS:
         self.get_inode = lru_cache(1024)(self.get_inode)
         self._read_group_desc = lru_cache(356)(self._read_group_desc)
 
-    @property
+    @cached_property
     def journal(self) -> JDB2:
-        if not self._journal:
-            if not self.sb.s_feature_compat & c_ext.EXT3_FEATURE_COMPAT_HAS_JOURNAL:
-                raise Error("Journal not supported")
+        if not self.sb.s_feature_compat & c_ext.EXT3_FEATURE_COMPAT_HAS_JOURNAL:
+            raise Error("Journal not supported")
 
-            inum = self.sb.s_journal_inum
-            if inum == 0:
-                raise Error(
-                    f"Journal inum is 0, could be on external device (s_journal_uuid = {self.sb.s_journal_uuid})"
-                )
+        inum = self.sb.s_journal_inum
+        if inum == 0:
+            raise Error(f"Journal inum is 0, could be on external device (s_journal_uuid = {self.sb.s_journal_uuid})")
 
-            inode = self.get_inode(inum)
-            self._journal = JDB2(inode.open())
-
-        return self._journal
+        inode = self.get_inode(inum)
+        return JDB2(inode.open())
 
     def get(self, path_or_inum: str | int, node: INode | None = None) -> INode:
         if isinstance(path_or_inum, int):
@@ -140,16 +134,11 @@ class ExtFS:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        lazy: bool = False,
     ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
             raise Error(f"inum out of range {c_ext.EXT2_BAD_INO}-{self.sb.s_inodes_count}: {inum}")
 
-        inode = INode(self, inum, filename, filetype)
-        if not lazy:
-            inode._inode = inode._read_inode()
-
-        return inode
+        return INode(self, inum, filename, filetype)
 
     def _read_group_desc(self, group_num: int) -> c_ext.ext2_group_desc | c_ext.ext4_group_desc:
         if group_num >= self.groups_count:
@@ -184,20 +173,15 @@ class INode:
     ):
         self.extfs = extfs
         self.inum = inum
-        self._inode = None
-
         self.filename = filename
         self._filetype = filetype
-        self._size = None
-        self._link = None
-        self._xattr = None
-
         self._runlist = None
 
     def __repr__(self) -> str:
         return f"<inode {self.inum}>"
 
-    def _read_inode(self) -> c_ext.ext4_inode:
+    @cached_property
+    def inode(self) -> c_ext.ext4_inode:
         block_group_num, index = divmod(self.inum - 1, self.extfs.sb.s_inodes_per_group)
         block_group = self.extfs._read_group_desc(block_group_num)
 
@@ -210,17 +194,9 @@ class INode:
         self.extfs.fh.seek(offset)
         return c_ext.ext4_inode(self.extfs.fh)
 
-    @property
-    def inode(self) -> c_ext.ext4_inode:
-        if not self._inode:
-            self._inode = self._read_inode()
-        return self._inode
-
-    @property
+    @cached_property
     def size(self) -> int:
-        if not self._size:
-            self._size = (self.inode.i_size_high << 32) + self.inode.i_size_lo
-        return self._size
+        return (self.inode.i_size_high << 32) + self.inode.i_size_lo
 
     @property
     def filetype(self) -> int:
@@ -228,41 +204,37 @@ class INode:
             self._filetype = stat.S_IFMT(self.inode.i_mode)
         return self._filetype
 
-    @property
+    @cached_property
     def link(self) -> str:
         if self.filetype != stat.S_IFLNK:
             raise NotASymlinkError(f"{self!r} is not a symlink")
 
-        if not self._link:
-            self._link = self.open().read().decode(errors="surrogateescape")
-        return self._link
+        return self.open().read().decode(errors="surrogateescape")
 
-    @property
+    @cached_property
     def xattr(self) -> list[XAttr]:
-        if not self._xattr:
-            xattr = []
+        xattr = []
 
-            if self.inode.i_extra.strip(b"\x00"):
-                buf = io.BytesIO(self.inode.i_extra)
-                hdr = c_ext.ext4_xattr_ibody_header(buf)
-                if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
-                    raise Error("Invalid xattr magic value")
+        if self.inode.i_extra.strip(b"\x00"):
+            buf = io.BytesIO(self.inode.i_extra)
+            hdr = c_ext.ext4_xattr_ibody_header(buf)
+            if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
+                raise Error("Invalid xattr magic value")
 
-                xattr.extend(_iter_xattr(self, buf, len(self.inode.i_extra), 4))
+            xattr.extend(_iter_xattr(self, buf, len(self.inode.i_extra), 4))
 
-            if self.inode.i_file_acl_lo:
-                block = (self.inode.i_file_acl_high << 32) | self.inode.i_file_acl_lo
-                block_offset = block * self.extfs.block_size
+        if self.inode.i_file_acl_lo:
+            block = (self.inode.i_file_acl_high << 32) | self.inode.i_file_acl_lo
+            block_offset = block * self.extfs.block_size
 
-                buf = RangeStream(self.extfs.fh, block_offset, self.extfs.block_size)
-                hdr = c_ext.ext4_xattr_header(buf)
-                if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
-                    raise Error("Invalid xattr magic value")
+            buf = RangeStream(self.extfs.fh, block_offset, self.extfs.block_size)
+            hdr = c_ext.ext4_xattr_header(buf)
+            if hdr.h_magic != c_ext.EXT4_XATTR_MAGIC:
+                raise Error("Invalid xattr magic value")
 
-                xattr.extend(_iter_xattr(self, buf, buf.size))
+            xattr.extend(_iter_xattr(self, buf, buf.size))
 
-            self._xattr = xattr
-        return self._xattr
+        return xattr
 
     @property
     def atime(self) -> datetime:
@@ -345,7 +317,7 @@ class INode:
                 if ftype:
                     ftype = FILETYPES[ftype]
 
-                yield self.extfs.get_inode(direntry.inode, fname, ftype, lazy=True)
+                yield self.extfs.get_inode(direntry.inode, fname, ftype)
 
             offset += direntry.rec_len
             buf.seek(offset)
