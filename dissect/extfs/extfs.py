@@ -134,16 +134,11 @@ class ExtFS:
         inum: int,
         filename: str | None = None,
         filetype: int | None = None,
-        lazy: bool = False,
     ) -> INode:
         if inum < c_ext.EXT2_BAD_INO or inum > self.sb.s_inodes_count:
             raise Error(f"inum out of range {c_ext.EXT2_BAD_INO}-{self.sb.s_inodes_count}: {inum}")
 
-        inode = INode(self, inum, filename, filetype)
-        if not lazy:
-            _ = inode.inode  # Warm up the cache
-
-        return inode
+        return INode(self, inum, filename, filetype)
 
     def _read_group_desc(self, group_num: int) -> c_ext.ext2_group_desc | c_ext.ext4_group_desc:
         if group_num >= self.groups_count:
@@ -322,7 +317,7 @@ class INode:
                 if ftype:
                     ftype = FILETYPES[ftype]
 
-                yield self.extfs.get_inode(direntry.inode, fname, ftype, lazy=True)
+                yield self.extfs.get_inode(direntry.inode, fname, ftype)
 
             offset += direntry.rec_len
             buf.seek(offset)
