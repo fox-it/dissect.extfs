@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "dissect.extfs"
 description = "A Dissect module implementing a parser for the ExtFS file system, the native filesystem for Linux operating systems"
 readme = "README.md"
-requires-python = "~=3.9"
+requires-python = ">=3.10"
 license.text = "Affero General Public License v3"
 authors = [
   {name = "Dissect Team", email = "dissect@fox-it.com"}
