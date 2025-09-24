@@ -28,6 +28,7 @@ def ext4_bin() -> Iterator[BinaryIO]:
 def ext4_sparse_bin() -> Iterator[BinaryIO]:
     yield from gzip_file("data/ext4_sparse.bin.gz")
 
+
 @pytest.fixture
 def ext4_symlink_bin() -> Iterator[BinaryIO]:
     yield from gzip_file("data/ext4_symlink_test.bin.gz")
