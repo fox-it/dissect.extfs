@@ -303,7 +303,17 @@ class INode:
         offset = 0
 
         while offset < self.size - 12:
-            direntry = self.extfs._dirtype(buf)
+            try:
+                direntry = self.extfs._dirtype(buf)
+
+            except EOFError:
+                log.critical(
+                    "Premature end of dirent buffer in %s (offset 0x%x, %s bytes before end)",
+                    self,
+                    offset,
+                    self.size - offset,  # usually 4096, e.g. the default block size
+                )
+                return
 
             if direntry.rec_len == 0:
                 log.critical("Zero-length directory entry in %s (offset 0x%x)", self, offset)
