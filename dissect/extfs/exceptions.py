@@ -16,3 +16,7 @@ class NotADirectoryError(Error, NotADirectoryError):
 
 class NotASymlinkError(Error):
     pass
+
+
+class DecryptionError(Error):
+    pass
