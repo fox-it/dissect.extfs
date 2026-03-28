@@ -20,6 +20,7 @@ from dissect.extfs.c_ext import (
     XATTR_PREFIX_MAP,
     c_ext,
 )
+from dissect.extfs.decryptor import EntryDecryptor
 from dissect.extfs.exceptions import (
     Error,
     FileNotFoundError,
@@ -162,6 +163,10 @@ class ExtFS:
 
         return group_desc
 
+    def _get_inode_decryptor(self, inode: INode) -> EntryDecryptor:
+        """By default, a stub decryptor is returned. This method can be overridden by an instantiator of ExtFS."""
+        return EntryDecryptor()
+
 
 class INode:
     def __init__(
@@ -290,6 +295,10 @@ class INode:
 
         return _parse_ns_ts(time, time_extra)
 
+    @property
+    def is_encrypted(self) -> bool:
+        return bool(self.inode.i_flags & c_ext.EXT4_ENCRYPT_FL)
+
     def listdir(self) -> dict[str, INode]:
         return {node.filename: node for node in self.iterdir()}
 
@@ -311,7 +320,11 @@ class INode:
 
             # Sanity check if the direntry is valid
             if 0 < direntry.inode < self.extfs.sb.s_inodes_count:
-                fname = buf.read(direntry.name_len).decode(errors="surrogateescape")
+                fname = buf.read(direntry.name_len)
+                if self.is_encrypted:
+                    fname = self.extfs._get_inode_decryptor(self).decrypt_filename(fname)
+
+                fname = fname.decode(errors="surrogateescape")
                 ftype = direntry.file_type if self.extfs._dirtype == c_ext.ext2_dir_entry_2 else None
 
                 if ftype:
@@ -403,6 +416,8 @@ class INode:
             # Need to add a size attribute to maintain compatibility with dissect streams
             buf.size = self.size
             return buf
+        if self.is_encrypted and self.filetype != stat.S_IFDIR:
+            return self.extfs._get_inode_decryptor(self).open_decrypt()
         return RunlistStream(self.extfs.fh, self.dataruns(), self.size, self.extfs.block_size)
 
 

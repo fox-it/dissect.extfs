@@ -367,6 +367,7 @@ struct ext4_extent {
 #define XATTR_SYSTEM_PREFIX                 "system."
 #define XATTR_TRUSTED_PREFIX                "trusted."
 #define XATTR_USER_PREFIX                   "user."
+#define XATTR_ENCRYPTION_PREFIX             "encryption."
 #define XATTR_POSIX_ACL_ACCESS              "posix_acl_access"
 #define XATTR_POSIX_ACL_DEFAULT             "posix_acl_default"
 
@@ -424,6 +425,7 @@ XATTR_PREFIX_MAP = {
     c_ext.EXT4_XATTR_INDEX_TRUSTED: c_ext.XATTR_TRUSTED_PREFIX,
     c_ext.EXT4_XATTR_INDEX_SECURITY: c_ext.XATTR_SECURITY_PREFIX,
     c_ext.EXT4_XATTR_INDEX_SYSTEM: c_ext.XATTR_SYSTEM_PREFIX,
+    c_ext.EXT4_XATTR_INDEX_ENCRYPTION: c_ext.XATTR_ENCRYPTION_PREFIX,
 }
 
 XATTR_NAME_MAP = {
